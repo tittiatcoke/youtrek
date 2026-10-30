@@ -49,6 +49,20 @@ struct IssueComment: Identifiable, Hashable, Sendable, Codable {
 }
 
 extension IssueDetail {
+    func replacing(title newTitle: String? = nil, description newDescription: String? = nil) -> IssueDetail {
+        IssueDetail(
+            id: id,
+            readableID: readableID,
+            title: newTitle ?? title,
+            description: newDescription ?? description,
+            reporter: reporter,
+            createdAt: createdAt,
+            updatedAt: Date(),
+            comments: comments,
+            attachments: attachments
+        )
+    }
+
     func appending(comment: IssueComment) -> IssueDetail {
         var updatedComments = comments
         updatedComments.append(comment)

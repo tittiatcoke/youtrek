@@ -650,6 +650,16 @@ actor IssueLocalStore {
                 }
             }
         }
+        // Boards place cards by these stored field values, so keep them in step with
+        // the status/priority change; otherwise the card stays in its old column.
+        if let option = patch.statusOption {
+            for key in ["state", "status"] where resolvedCustomFields[key] != nil {
+                resolvedCustomFields[key] = [option.displayName]
+            }
+        }
+        if let option = patch.priorityOption, resolvedCustomFields["priority"] != nil {
+            resolvedCustomFields["priority"] = [option.displayName]
+        }
         return IssueSummary(
             id: issue.id,
             readableID: issue.readableID,
@@ -733,6 +743,12 @@ actor IssueLocalStore {
                 }
                 return stableIssueOrder($0, $1)
             }
+        case .issueID(let descending):
+            return filtered.sorted {
+                let order = $0.readableID.compare($1.readableID, options: [.numeric, .caseInsensitive])
+                if order == .orderedSame { return stableIssueOrder($0, $1) }
+                return descending ? order == .orderedDescending : order == .orderedAscending
+            }
         case .none:
             return filtered
         }
@@ -795,6 +811,8 @@ actor IssueLocalStore {
             sortKey = "updated:\(descending)"
         case .priority(let descending):
             sortKey = "priority:\(descending)"
+        case .issueID(let descending):
+            sortKey = "issueID:\(descending)"
         case .none:
             sortKey = "none"
         }

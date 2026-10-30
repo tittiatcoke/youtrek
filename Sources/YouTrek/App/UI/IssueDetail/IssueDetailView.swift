@@ -7,6 +7,9 @@ struct IssueDetailView: View {
     let issue: IssueSummary
     let detail: IssueDetail?
     let isLoadingDetail: Bool
+    /// When set, field edits are handed to this closure instead of being written
+    /// immediately (used by the issue editor window, which saves on demand).
+    var onSubmitPatch: ((IssuePatch) -> Void)? = nil
     @State private var statusOptions: [IssueFieldOption] = []
     @State private var priorityOptions: [IssueFieldOption] = []
     @State private var projectOptions: [IssueProject] = []
@@ -20,6 +23,10 @@ struct IssueDetailView: View {
     @State private var isLoadingSubIssues: Bool = false
     @State private var subIssuesError: String?
     @State private var commentText: String = ""
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @State private var isEditingDescription = false
+    @State private var descriptionDraft = ""
     @State private var isSubmittingComment: Bool = false
     @State private var commentError: String?
     @State private var isPickingAttachment = false
@@ -87,6 +94,8 @@ struct IssueDetailView: View {
             projectOptions = []
             customFields = []
             commentText = ""
+            isEditingTitle = false
+            isEditingDescription = false
             commentError = nil
             lastIssueCopyTimestamp = nil
             lastIssueCopiedID = nil
@@ -166,8 +175,34 @@ struct IssueDetailView: View {
                 .keyboardShortcut("c", modifiers: [.command])
                 .help("Copy issue ID")
             }
-            Text(issue.title)
-                .font(.system(size: 24, weight: .bold))
+            if isEditingTitle {
+                HStack(spacing: 8) {
+                    TextField("Title", text: $titleDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 20, weight: .bold))
+                        .onSubmit { saveTitle() }
+                        .onExitCommand { isEditingTitle = false }
+                    Button("Save") { saveTitle() }
+                        .disabled(titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Cancel") { isEditingTitle = false }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(issue.title)
+                        .font(.system(size: 24, weight: .bold))
+                    if !issue.isDraft {
+                        Button {
+                            titleDraft = issue.title
+                            isEditingTitle = true
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Edit title")
+                        .accessibilityLabel("Edit title")
+                    }
+                }
+            }
             HStack(spacing: 8) {
                 statusMenu
                 priorityMenu
@@ -197,7 +232,7 @@ struct IssueDetailView: View {
         // metadata, and this section previously derived it three times.
         let displayItems = customFieldItems.filter { !$0.values.isEmpty }
         return VStack(alignment: .leading, spacing: 8) {
-            AssigneeEditor(issue: issue)
+            AssigneeEditor(issue: issue, onSubmitPatch: onSubmitPatch)
             metadataRow(systemImage: "clock") {
                 Text("Updated \(IssueTimestampFormatter.label(for: issue.updatedAt))")
             }
@@ -463,9 +498,7 @@ struct IssueDetailView: View {
         patch.customFields = [
             IssueDraftField(name: trimmedName, kind: field.kind, allowsMultiple: field.allowsMultiple, value: value)
         ]
-        Task {
-            await container.updateIssue(id: issue.id, patch: patch)
-        }
+        submit(patch)
     }
 
     private static let isoDateTimeFractionFormatter: ISO8601DateFormatter = {
@@ -496,6 +529,14 @@ struct IssueDetailView: View {
         }
     }()
 
+    private func submit(_ patch: IssuePatch) {
+        if let onSubmitPatch {
+            onSubmitPatch(patch)
+        } else {
+            Task { await container.updateIssue(id: issue.id, patch: patch) }
+        }
+    }
+
     private func updateProject(_ project: IssueProject) {
         let currentProjectID = projectOptions.first { $0.matches(identifier: issue.projectName) }?.id
         guard project.id != currentProjectID else { return }
@@ -504,9 +545,7 @@ struct IssueDetailView: View {
         patch.issueReadableID = issue.readableID
         patch.projectID = project.id
         patch.projectName = trimmedName.isEmpty ? project.displayName : trimmedName
-        Task {
-            await container.updateIssue(id: issue.id, patch: patch)
-        }
+        submit(patch)
     }
 
     private func metadataRow<Content: View>(
@@ -537,9 +576,31 @@ struct IssueDetailView: View {
 
     private var descriptionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Description")
-                .font(.headline)
-            if let description = descriptionText {
+            HStack {
+                Text("Description")
+                    .font(.headline)
+                Spacer()
+                if !issue.isDraft, !isEditingDescription, detail != nil {
+                    Button("Edit") {
+                        descriptionDraft = detail?.description ?? ""
+                        isEditingDescription = true
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Edit description")
+                }
+            }
+            if isEditingDescription {
+                ClipboardImageMarkdownTextEditor(text: $descriptionDraft)
+                    .frame(minHeight: 160)
+                    .accessibilityLabel("Description text")
+                HStack {
+                    Spacer()
+                    Button("Cancel") { isEditingDescription = false }
+                    Button("Save") { saveDescription() }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                        .disabled(descriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else if let description = descriptionText {
                 MarkdownTextView(
                     text: description,
                     baseURL: markdownImageBaseURL,
@@ -1075,22 +1136,42 @@ struct IssueDetailView: View {
         optionMatches(option, name: issue.priority.displayName)
     }
 
+    private func saveTitle() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        guard !trimmed.isEmpty, trimmed != issue.title else { return }
+        var patch = IssuePatch(title: trimmed, description: nil, status: nil, priority: nil)
+        patch.issueReadableID = issue.readableID
+        if let detail, onSubmitPatch == nil {
+            container.appState.updateIssueDetail(detail.replacing(title: trimmed))
+        }
+        submit(patch)
+    }
+
+    private func saveDescription() {
+        let trimmed = descriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingDescription = false
+        guard !trimmed.isEmpty, trimmed != (detail?.description ?? "") else { return }
+        var patch = IssuePatch(title: nil, description: trimmed, status: nil, priority: nil)
+        patch.issueReadableID = issue.readableID
+        if let detail, onSubmitPatch == nil {
+            container.appState.updateIssueDetail(detail.replacing(description: trimmed))
+        }
+        submit(patch)
+    }
+
     private func updateStatus(_ option: IssueFieldOption) {
         guard !optionMatchesStatus(option) else { return }
         var patch = IssuePatch(title: nil, description: nil, status: nil, statusOption: option, priority: nil)
         patch.issueReadableID = issue.readableID
-        Task {
-            await container.updateIssue(id: issue.id, patch: patch)
-        }
+        submit(patch)
     }
 
     private func updatePriority(_ option: IssueFieldOption) {
         guard !optionMatchesPriority(option) else { return }
         var patch = IssuePatch(title: nil, description: nil, status: nil, priority: nil, priorityOption: option)
         patch.issueReadableID = issue.readableID
-        Task {
-            await container.updateIssue(id: issue.id, patch: patch)
-        }
+        submit(patch)
     }
 
     private var commentComposer: some View {
@@ -1807,6 +1888,7 @@ private struct ProjectOptionRow: View {
 private struct AssigneeEditor: View {
     @EnvironmentObject private var container: AppContainer
     let issue: IssueSummary
+    var onSubmitPatch: ((IssuePatch) -> Void)? = nil
     @State private var isPresented = false
 
     var body: some View {
@@ -1823,7 +1905,7 @@ private struct AssigneeEditor: View {
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            AssigneePickerPopover(issue: issue, isPresented: $isPresented)
+            AssigneePickerPopover(issue: issue, isPresented: $isPresented, onSubmitPatch: onSubmitPatch)
                 .environmentObject(container)
         }
     }
@@ -1833,6 +1915,7 @@ private struct AssigneePickerPopover: View {
     @EnvironmentObject private var container: AppContainer
     let issue: IssueSummary
     @Binding var isPresented: Bool
+    var onSubmitPatch: ((IssuePatch) -> Void)? = nil
 
     var body: some View {
         ProjectAssigneePickerPopover(
@@ -1860,8 +1943,10 @@ private struct AssigneePickerPopover: View {
             guard issue.assignee != nil else { return }
             patch.assignee = .clear
         }
-        Task {
-            await container.updateIssue(id: issue.id, patch: patch)
+        if let onSubmitPatch {
+            onSubmitPatch(patch)
+        } else {
+            Task { await container.updateIssue(id: issue.id, patch: patch) }
         }
         isPresented = false
     }

@@ -46,6 +46,8 @@ extension IssueQuery {
                     parts.append("sort by: updated \(descending ? "desc" : "asc")")
                 case .priority(let descending):
                     parts.append("sort by: priority \(descending ? "desc" : "asc")")
+                case .issueID(let descending):
+                    parts.append("sort by: {issue id} \(descending ? "desc" : "asc")")
                 }
             }
             return parts.joined(separator: " ")
@@ -69,6 +71,8 @@ extension IssueQuery {
                 parts.append("sort by: updated \(descending ? "desc" : "asc")")
             case .priority(let descending):
                 parts.append("sort by: priority \(descending ? "desc" : "asc")")
+            case .issueID(let descending):
+                parts.append("sort by: {issue id} \(descending ? "desc" : "asc")")
             }
         }
 
@@ -122,6 +126,7 @@ extension IssueQuery {
 enum IssueSort: Equatable, Hashable, Sendable {
     case updated(descending: Bool)
     case priority(descending: Bool)
+    case issueID(descending: Bool)
 }
 
 struct IssueDraft: Equatable, Codable {

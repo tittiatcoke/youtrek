@@ -28,17 +28,25 @@ final class AppContainer: ObservableObject {
     private let projectRepositorySwitcher: SwitchableProjectRepository
     private let issueFieldRepositorySwitcher: SwitchableIssueFieldRepository
     private let peopleRepositorySwitcher: SwitchablePeopleRepository
+    private let articleRepositorySwitcher = SwitchableArticleRepository(initial: EmptyArticleRepository())
     private var boardLocalStore: IssueBoardLocalStore
     private var savedQueryLocalStore: SavedQueryLocalStore
     private var todoListStore: TodoListMarkdownStore
     private var lastLoadedIssueQuery: IssueQuery?
+    /// User-chosen ordering for the Inbox / Assigned to Me / Created by Me lists; nil keeps the default (recently updated first).
+    private(set) var smartListSort: IssueSort?
     private var lastLoadedIssueSelection: SidebarItem?
     private var activeIssueLoadRequestID: UUID?
     private var cachedProjects: [IssueProject] = []
     private var cachedSavedQueries: [SavedQuery] = []
     private var cachedBoards: [IssueBoard] = []
+    @Published private(set) var cachedArticles: [KnowledgeBaseArticle] = []
+    private var cachedKnowledgeBaseProjects: [IssueProject] = []
     private var cachedTodoLists: [TodoListDocument] = []
     private var statusOptionsCache: [String: [IssueFieldOption]] = [:]
+    /// Every State value defined across all projects, for the list filter menu.
+    private(set) var allStateOptionNames: [String] = []
+    private var isLoadingAllStateOptions = false
     private var priorityOptionsCache: [String: [IssueFieldOption]] = [:]
     private var assigneeOptionsCache: [String: [IssueFieldOption]] = [:]
     private var hasStartedBoardPrefetch = false
@@ -327,9 +335,9 @@ final class AppContainer: ObservableObject {
         LoggingService.sync.info("Bootstrap: cached saved searches loaded (\(cachedSavedQueries.count, privacy: .public)).")
         LoggingService.sync.info("Bootstrap: cached todo lists loaded (\(cachedTodoLists.count, privacy: .public)).")
         let initialSections = buildSidebarSections(savedQueries: cachedSavedQueries, boards: cachedBoards, todoLists: cachedTodoLists)
-        let storedSelectionID = storedSidebarSelectionID()
-        let initialPreferredSelectionID = storedSelectionID ?? preferredSelectionID(from: cachedSavedQueries)
-        let shouldFallbackToFirstItem = storedSelectionID == nil
+        // Always start on the Inbox (or the saved search named Inbox), not the last-used selection.
+        let initialPreferredSelectionID = preferredSelectionID(from: cachedSavedQueries)
+        let shouldFallbackToFirstItem = true
 
         appState.updateSidebar(
             sections: initialSections,
@@ -480,6 +488,7 @@ final class AppContainer: ObservableObject {
         lastLoadedIssueSelection = nil
         activeIssueLoadRequestID = nil
         statusOptionsCache.removeAll()
+        allStateOptionNames = []
         priorityOptionsCache.removeAll()
         assigneeOptionsCache.removeAll()
         cachedSavedQueries = []
@@ -519,7 +528,7 @@ final class AppContainer: ObservableObject {
     /// renders the previous selection's rows — or a false "No issues" empty
     /// state — under the new selection while its load is still starting.
     func beginIssueListTransition(to selection: SidebarItem) {
-        guard !selection.isDraft, !selection.isTodoList else { return }
+        guard selection.showsIssueList else { return }
         guard lastLoadedIssueSelection?.id != selection.id else { return }
         appState.setIssuesLoading(true)
         if !appState.issues.isEmpty {
@@ -537,8 +546,15 @@ final class AppContainer: ObservableObject {
         }
     }
 
+    func setSmartListSort(_ sort: IssueSort?) {
+        guard smartListSort != sort else { return }
+        smartListSort = sort
+        guard let selection = appState.selectedSidebarItem, selection.isSmartList else { return }
+        Task { await loadIssues(for: selection) }
+    }
+
     func loadIssues(for selection: SidebarItem) async {
-        guard !selection.isDraft, !selection.isTodoList else { return }
+        guard selection.showsIssueList else { return }
         let selectionChanged = lastLoadedIssueSelection?.id != selection.id
         if selectionChanged {
             beginIssueListTransition(to: selection)
@@ -559,7 +575,11 @@ final class AppContainer: ObservableObject {
             )
             query = boardIssueQuery(for: boardForQuery, page: page)
         } else {
-            query = selection.query
+            var listQuery = selection.query
+            if let smartListSort, selection.isSmartList {
+                listQuery.sort = smartListSort
+            }
+            query = listQuery
         }
         if selection.isBoard,
            let resolvedBoard,
@@ -666,7 +686,7 @@ final class AppContainer: ObservableObject {
             currentUserID: appState.currentUserID,
             currentUserLogin: appState.currentUserLogin,
             currentUserDisplayName: appState.currentUserDisplayName,
-            paginate: selection.isBoard
+            paginate: selection.isBoard || selection.isSmartList
         )
         if let remoteIDs = await remoteSprintIssueIDs {
             sprintIssueIDs = remoteIDs
@@ -886,7 +906,7 @@ final class AppContainer: ObservableObject {
             currentUserID: appState.currentUserID,
             currentUserLogin: appState.currentUserLogin,
             currentUserDisplayName: appState.currentUserDisplayName,
-            paginate: item.isBoard
+            paginate: item.isBoard || item.isSmartList
         )
         if let remoteIDs = await remoteSprintIssueIDs {
             sprintIssueIDs = remoteIDs
@@ -1209,6 +1229,7 @@ final class AppContainer: ObservableObject {
                 self.cachedSavedQueries = []
                 self.cachedBoards = []
                 self.statusOptionsCache.removeAll()
+                self.allStateOptionNames = []
                 self.priorityOptionsCache.removeAll()
                 self.assigneeOptionsCache.removeAll()
             }
@@ -1248,6 +1269,47 @@ final class AppContainer: ObservableObject {
             print(message)
             appState.showToast(message)
         }
+    }
+
+    /// Moves a card to another board column by writing the column's value to the
+    /// board's column field (State by default, or a custom enum field).
+    func moveIssue(_ issue: IssueSummary, toColumnValues values: [String], columnFieldName: String?) async {
+        let targets = Set(values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
+        guard !targets.isEmpty else { return }
+        func match(_ options: [IssueFieldOption]) -> IssueFieldOption? {
+            options.first { option in
+                targets.contains(option.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                    || targets.contains(option.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            }
+        }
+        var patch = IssuePatch(title: nil, description: nil, status: nil, priority: nil)
+        patch.issueReadableID = issue.readableID
+        let normalizedField = columnFieldName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if normalizedField.isEmpty || normalizedField == "state" || normalizedField == "status" {
+            guard let option = match(await loadStatusOptions(for: issue)) else {
+                appState.showToast("Couldn't find a matching state for that column.")
+                return
+            }
+            patch.statusOption = option
+        } else {
+            guard let project = await resolveProject(named: issue.projectName),
+                  let field = await loadFields(for: project.id).first(where: { $0.normalizedName == normalizedField }) else {
+                appState.showToast("Couldn't find the board's column field in this project.")
+                return
+            }
+            var options = field.options
+            if options.isEmpty, let bundleID = field.bundleID {
+                options = await loadBundleOptions(bundleID: bundleID, kind: field.kind)
+            }
+            guard let option = match(options) else {
+                appState.showToast("Couldn't find a matching value for that column.")
+                return
+            }
+            patch.customFields = [
+                IssueDraftField(name: field.name, kind: field.kind, allowsMultiple: field.allowsMultiple, value: .option(option))
+            ]
+        }
+        await updateIssue(id: issue.id, patch: patch)
     }
 
     func addComment(to issue: IssueSummary, text: String) async throws -> IssueComment {
@@ -1439,8 +1501,7 @@ final class AppContainer: ObservableObject {
     private func refreshIssueListsAfterCreation() async {
         guard !requiresSetup else { return }
         if let selection = appState.selectedSidebarItem,
-           !selection.isDraft,
-           !selection.isTodoList {
+           selection.showsIssueList {
             if selection.isBoard {
                 await refreshBoardIssues(for: selection)
             } else {
@@ -1455,7 +1516,7 @@ final class AppContainer: ObservableObject {
             currentUserID: appState.currentUserID,
             currentUserLogin: appState.currentUserLogin,
             currentUserDisplayName: appState.currentUserDisplayName,
-            paginate: lastLoadedIssueSelection?.isBoard == true
+            paginate: lastLoadedIssueSelection.map { $0.isBoard || $0.isSmartList } ?? false
         )
         if syncResult.didSyncRemote || !syncResult.issues.isEmpty {
             recordIssueSyncCompleted()
@@ -1917,6 +1978,7 @@ final class AppContainer: ObservableObject {
         await projectRepositorySwitcher.replace(with: projectRepository)
         await issueFieldRepositorySwitcher.replace(with: fieldRepository)
         await peopleRepositorySwitcher.replace(with: peopleRepository)
+        await articleRepositorySwitcher.replace(with: YouTrackArticleRepository(configuration: apiConfiguration, monitor: networkMonitor))
 
         await MainActor.run {
             requiresSetup = false
@@ -2166,6 +2228,7 @@ final class AppContainer: ObservableObject {
         await projectRepositorySwitcher.replace(with: projectRepository)
         await issueFieldRepositorySwitcher.replace(with: fieldRepository)
         await peopleRepositorySwitcher.replace(with: peopleRepository)
+        await articleRepositorySwitcher.replace(with: YouTrackArticleRepository(configuration: apiConfiguration, monitor: networkMonitor))
         requiresSetup = false
     }
 }
@@ -2271,6 +2334,52 @@ private extension AppContainer {
 }
 
 extension AppContainer {
+    func knowledgeBaseArticles(for projectID: String) -> [KnowledgeBaseArticle] {
+        cachedArticles.filter { $0.projectID == projectID }
+    }
+
+    func searchKnowledgeBaseArticleIDs(query: String) async -> [String] {
+        (try? await articleRepositorySwitcher.searchArticleIDs(query: query)) ?? []
+    }
+
+    func knowledgeBaseArticle(id: String) -> KnowledgeBaseArticle? {
+        cachedArticles.first { $0.id == id }
+    }
+
+    /// Resolves a link such as https://host/articles/HOM-A-8/Title to a cached article of this YouTrack instance.
+    func knowledgeBaseArticle(for url: URL) -> KnowledgeBaseArticle? {
+        if let host = url.host, let baseHost = configurationStore.loadBaseURL()?.host, host != baseHost { return nil }
+        let parts = url.pathComponents
+        guard let index = parts.firstIndex(of: "articles"), parts.indices.contains(index + 1) else { return nil }
+        let key = parts[index + 1]
+        return cachedArticles.first { $0.readableID.caseInsensitiveCompare(key) == .orderedSame || $0.id == key }
+    }
+
+    /// Navigates to the article, switching to its project's knowledge base when needed.
+    func openKnowledgeBaseArticle(_ article: KnowledgeBaseArticle) {
+        guard let projectID = article.projectID,
+              let item = appState.sidebarSections.flatMap(\.items).first(where: { $0.knowledgeBaseProjectID == projectID })
+        else { return }
+        appState.selectedArticleID = article.id
+        if appState.selectedSidebarItem?.id != item.id {
+            appState.selectedSidebarItem = item
+        }
+    }
+
+    func loadKnowledgeBaseArticle(id: String) async throws -> KnowledgeBaseArticle {
+        try await articleRepositorySwitcher.fetchArticle(id: id)
+    }
+
+    /// Fetches every article once and lists only projects that actually have a knowledge base.
+    /// A failure (e.g. no Read Article permission) keeps the previous cache rather than hiding the section.
+    func refreshKnowledgeBase() async {
+        guard let articles = try? await articleRepositorySwitcher.fetchArticles() else { return }
+        let projects = await loadProjects()
+        let projectIDs = Set(articles.compactMap(\.projectID))
+        cachedArticles = articles
+        cachedKnowledgeBaseProjects = projects.filter { projectIDs.contains($0.id) && !$0.isArchived }
+    }
+
     func refreshSidebarData() async {
         await refreshSidebarDataInternal()
     }
@@ -2299,8 +2408,9 @@ private extension AppContainer {
 
         let resolvedTodoLists = (try? await todoListStore.listDocuments()) ?? cachedTodoLists
         cachedTodoLists = resolvedTodoLists
+        await refreshKnowledgeBase()
         let sections = buildSidebarSections(savedQueries: resolvedSavedQueries, boards: resolvedBoards, todoLists: resolvedTodoLists)
-        let preferredSelectionID = storedSidebarSelectionID() ?? preferredSelectionID(from: resolvedSavedQueries)
+        let preferredSelectionID = preferredSelectionID(from: resolvedSavedQueries)
         let previousSelectionID = appState.selectedSidebarItem?.id
 
         appState.updateSidebar(sections: sections, preferredSelectionID: preferredSelectionID)
@@ -2316,14 +2426,16 @@ private extension AppContainer {
         let visibleSavedQueries = limitedSavedQueries(from: savedQueries)
         let listPage = IssueQuery.Page(size: 50, offset: 0)
         let boardPage = IssueQuery.Page(size: 0, offset: 0)
+        // Size 0 = unbounded cache reads; remote sync pages through every result.
+        let smartPage = boardPage
         let savedInbox = visibleSavedQueries.first { $0.name.caseInsensitiveCompare("Inbox") == .orderedSame }
 
         var smartItems: [SidebarItem] = []
         if savedInbox == nil {
-            smartItems.append(.inbox(page: listPage))
+            smartItems.append(.inbox(page: smartPage))
         }
-        smartItems.append(.assignedToMe(page: listPage))
-        smartItems.append(.createdByMe(page: listPage))
+        smartItems.append(.assignedToMe(page: smartPage))
+        smartItems.append(.createdByMe(page: smartPage))
         let todoItems = todoLists.map { SidebarItem.todoList($0, page: listPage) }
 
         let savedItems = visibleSavedQueries.map { SidebarItem.savedSearch($0, page: listPage) }
@@ -2350,6 +2462,10 @@ private extension AppContainer {
         )
         if !savedItems.isEmpty {
             sections.append(SidebarSection(id: "saved", title: "Saved Searches", items: savedItems))
+        }
+        let knowledgeBaseItems = cachedKnowledgeBaseProjects.map { SidebarItem.knowledgeBase(project: $0, page: boardPage) }
+        if !knowledgeBaseItems.isEmpty {
+            sections.append(SidebarSection(id: "knowledge-base", title: "Knowledge Base", items: knowledgeBaseItems))
         }
         return sections
     }
@@ -2815,6 +2931,10 @@ private extension AppContainer {
 }
 
 extension AppContainer {
+    func refreshAllStateOptions() async {
+        await performStateOptionsRefresh()
+    }
+
     func loadProjects() async -> [IssueProject] {
         do {
             let projects = try await projectRepositorySwitcher.fetchProjects()
@@ -2973,6 +3093,25 @@ private extension AppContainer {
                 .lowercased()
                 .contains(needle)
         }
+    }
+
+    func performStateOptionsRefresh() async {
+        guard allStateOptionNames.isEmpty, !isLoadingAllStateOptions else { return }
+        isLoadingAllStateOptions = true
+        defer { isLoadingAllStateOptions = false }
+        let projects = await loadProjects()
+        var seen = Set<String>()
+        var names: [String] = []
+        for project in projects {
+            let projectOptions = await loadStatusOptions(for: project)
+            for option in projectOptions {
+                let name = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty, seen.insert(name.lowercased()).inserted {
+                    names.append(name)
+                }
+            }
+        }
+        allStateOptionNames = names
     }
 
     func loadStatusOptions(for project: IssueProject) async -> [IssueFieldOption] {
@@ -3386,6 +3525,14 @@ private struct EmptyIssueRepository: IssueRepository {
 
     func linkSubIssue(parentReadableID: String, childReadableID: String) async throws {
         throw YouTrackAPIError.http(statusCode: 503, body: "Issue repository is not configured")
+    }
+}
+
+private struct EmptyArticleRepository: ArticleRepository {
+    func fetchArticles() async throws -> [KnowledgeBaseArticle] { [] }
+    func searchArticleIDs(query: String) async throws -> [String] { [] }
+    func fetchArticle(id: String) async throws -> KnowledgeBaseArticle {
+        throw YouTrackAPIError.http(statusCode: 503, body: "Article repository is not configured")
     }
 }
 

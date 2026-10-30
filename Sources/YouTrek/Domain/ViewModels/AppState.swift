@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     @Published private(set) var columnVisibility: NavigationSplitViewVisibility = .all
     @Published var selectedSidebarItem: SidebarItem?
     @Published private(set) var sidebarSections: [SidebarSection] = []
+    @Published var selectedArticleID: String?
     @Published var selectedIssue: IssueSummary?
     @Published var selectedIssueIDs: Set<IssueSummary.ID> = []
     @Published private(set) var issues: [IssueSummary]
@@ -37,6 +38,7 @@ final class AppState: ObservableObject {
     @Published private var boardSprintFilters: [String: BoardSprintFilter] = [:]
     @Published var activeConflict: ConflictNotice?
     @Published var activeNewIssueDialog: NewIssueDialogState?
+    @Published var issueEditorTarget: IssueSummary?
     @Published var activeCommandPalette: CommandPaletteState?
     @Published var subIssueRefresh: SubIssueRefresh?
     @Published var issueDetailRefresh: IssueDetailRefresh?
@@ -543,6 +545,15 @@ final class AppState: ObservableObject {
 
     func presentNewIssueDialog(state: NewIssueDialogState = NewIssueDialogState()) {
         activeNewIssueDialog = state
+    }
+
+    func presentIssueEditor(for issue: IssueSummary) {
+        guard !issue.isDraft else { return }
+        issueEditorTarget = issue
+    }
+
+    func dismissIssueEditor() {
+        issueEditorTarget = nil
     }
 
     func dismissNewIssueDialog() {

@@ -238,7 +238,12 @@ struct WorkspaceIssueListComposer {
     }
 
     @MainActor
-    static func visibleIssues(appState: AppState, selection: SidebarItem?, searchQuery: String) -> [IssueSummary] {
+    static func visibleIssues(
+        appState: AppState,
+        selection: SidebarItem?,
+        searchQuery: String,
+        stateFilter: Set<String> = []
+    ) -> [IssueSummary] {
         let baseIssues: [IssueSummary]
         if let selection, selectionShowsDrafts(selection) {
             let drafts = appState.draftRecords
@@ -248,7 +253,20 @@ struct WorkspaceIssueListComposer {
         } else {
             baseIssues = appState.issues
         }
-        return appState.filteredIssues(baseIssues, searchQuery: searchQuery)
+        let searched = appState.filteredIssues(baseIssues, searchQuery: searchQuery)
+        guard !stateFilter.isEmpty, selection?.isSmartList == true else { return searched }
+        return searched.filter { stateFilter.contains($0.status.displayName) }
+    }
+}
+
+/// Lets mouse events fall through to the views beneath unless the predicate claims the point.
+final class OverlayPassthroughView: NSView {
+    var hitTestPredicate: ((NSPoint) -> Bool)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard hitTestPredicate?(local) == true else { return nil }
+        return super.hitTest(point)
     }
 }
 
@@ -262,8 +280,10 @@ final class WorkspaceViewController: NSViewController {
     private let appState: AppState
     private let splitController = RootSplitViewController()
     private let overlayController = NSHostingController(rootView: AnyView(EmptyView()))
+    private let overlayContainer = OverlayPassthroughView()
 
     private var toolbarController: WorkspaceToolbarController?
+    private var autoRefreshTimer: Timer?
     private var cancellables: Set<AnyCancellable> = []
     private var previousSidebarSelection: SidebarItem?
     private let uiState: WorkspaceUIState
@@ -303,19 +323,36 @@ final class WorkspaceViewController: NSViewController {
         splitController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(splitController.view)
 
+        // The overlay hosting view spans the whole window; without a pass-through
+        // wrapper it swallows every mouse click meant for the panes underneath.
         addChild(overlayController)
+        overlayContainer.translatesAutoresizingMaskIntoConstraints = false
         overlayController.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(overlayController.view)
+        overlayContainer.addSubview(overlayController.view)
+        view.addSubview(overlayContainer)
+        overlayContainer.hitTestPredicate = { [weak self] point in
+            guard let self else { return false }
+            if self.appState.activeCommandPalette != nil { return true }
+            if self.appState.activeToast != nil {
+                let bounds = self.overlayContainer.bounds
+                return point.x > bounds.maxX - 380 && point.y > bounds.maxY - 100
+            }
+            return false
+        }
 
         NSLayoutConstraint.activate([
             splitController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             splitController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             splitController.view.topAnchor.constraint(equalTo: view.topAnchor),
             splitController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            overlayController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            overlayController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            overlayController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            overlayController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            overlayContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlayContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlayContainer.topAnchor.constraint(equalTo: view.topAnchor),
+            overlayContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            overlayController.view.leadingAnchor.constraint(equalTo: overlayContainer.leadingAnchor),
+            overlayController.view.trailingAnchor.constraint(equalTo: overlayContainer.trailingAnchor),
+            overlayController.view.topAnchor.constraint(equalTo: overlayContainer.topAnchor),
+            overlayController.view.bottomAnchor.constraint(equalTo: overlayContainer.bottomAnchor)
         ])
 
         observeState()
@@ -325,6 +362,7 @@ final class WorkspaceViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         installToolbarIfNeeded()
+        startAutoRefresh()
     }
 
     override func preferredContentSizeDidChange(for viewController: NSViewController) {
@@ -550,9 +588,6 @@ final class WorkspaceViewController: NSViewController {
             appState.selectedDraftID = nil
             return
         }
-        if !appState.isInspectorVisible {
-            appState.setInspectorVisible(true)
-        }
         if appState.selectedIssueIDs != [issue.id] {
             appState.selectedIssueIDs = [issue.id]
         }
@@ -579,7 +614,15 @@ final class WorkspaceViewController: NSViewController {
             appState.setInspectorVisible(false)
         }
 
-        if selection.isTodoList {
+        if selection.isKnowledgeBase {
+            if !appState.isInspectorVisible { appState.setInspectorVisible(true) }
+            if previous?.id != selection.id,
+               container.knowledgeBaseArticle(id: appState.selectedArticleID ?? "")?.projectID != selection.knowledgeBaseProjectID {
+                appState.selectedArticleID = nil
+            }
+        }
+
+        if selection.isTodoList || selection.isKnowledgeBase {
             appState.selectedDraftID = nil
             appState.selectedIssue = nil
             appState.selectedIssueIDs.removeAll()
@@ -669,8 +712,76 @@ final class WorkspaceViewController: NSViewController {
         hasUnreadIssues
     }
 
+    fileprivate func refreshCurrentSelection() {
+        guard let selection = appState.selectedSidebarItem, !selection.isDraft else { return }
+        Task { [container] in
+            if selection.isBoard {
+                await container.refreshBoardIssues(for: selection)
+            } else {
+                await container.loadIssues(for: selection)
+            }
+        }
+    }
+
+    private func startAutoRefresh() {
+        autoRefreshTimer?.invalidate()
+        autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, NSApp.isActive, self.view.window?.isKeyWindow == true,
+                      !self.appState.isLoadingIssues else { return }
+                self.refreshCurrentSelection()
+            }
+        }
+    }
+
     fileprivate func markAllIssuesSeen() {
         container.markAllIssuesSeen()
+    }
+
+    fileprivate var smartListSort: IssueSort? {
+        container.smartListSort
+    }
+
+    fileprivate var selectionSupportsSort: Bool {
+        appState.selectedSidebarItem?.isSmartList == true
+    }
+
+    /// Every State defined in YouTrack, plus any value present on loaded issues
+    /// that the field definitions don't list (e.g. renamed or legacy values).
+    fileprivate var stateFilterOptions: [String] {
+        var names = container.allStateOptionNames
+        var seen = Set(names.map { $0.lowercased() })
+        let extras = Set(appState.issues.map { $0.status.displayName })
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        for extra in extras where seen.insert(extra.lowercased()).inserted {
+            names.append(extra)
+        }
+        return names
+    }
+
+    fileprivate func loadStateFilterOptions() {
+        Task { [container] in await container.refreshAllStateOptions() }
+    }
+
+    fileprivate var selectedStates: Set<String> {
+        guard let id = appState.selectedSidebarItem?.id else { return [] }
+        return uiState.stateFilters[id] ?? []
+    }
+
+    fileprivate func toggleStateFilter(_ state: String) {
+        guard let id = appState.selectedSidebarItem?.id else { return }
+        var current = uiState.stateFilters[id] ?? []
+        if !current.insert(state).inserted { current.remove(state) }
+        uiState.stateFilters[id] = current
+    }
+
+    fileprivate func clearStateFilter() {
+        guard let id = appState.selectedSidebarItem?.id else { return }
+        uiState.stateFilters[id] = nil
+    }
+
+    fileprivate func setSmartListSort(_ sort: IssueSort?) {
+        container.setSmartListSort(sort)
     }
 
     fileprivate func openNewIssue() {
@@ -694,13 +805,16 @@ final class WorkspaceViewController: NSViewController {
 }
 
 @MainActor
-private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
+private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate, NSMenuDelegate {
     private enum ItemID {
         static let toggleSidebar = NSToolbarItem.Identifier("workspace.toggleSidebar")
         static let search = NSToolbarItem.Identifier("workspace.search")
         static let commandPalette = NSToolbarItem.Identifier("workspace.commandPalette")
+        static let refreshList = NSToolbarItem.Identifier("workspace.refreshList")
         static let progressMode = NSToolbarItem.Identifier("workspace.progressMode")
         static let markAllRead = NSToolbarItem.Identifier("workspace.markAllRead")
+        static let sort = NSToolbarItem.Identifier("workspace.sort")
+        static let stateFilter = NSToolbarItem.Identifier("workspace.stateFilter")
         static let newIssue = NSToolbarItem.Identifier("workspace.newIssue")
         static let toggleInspector = NSToolbarItem.Identifier("workspace.toggleInspector")
     }
@@ -711,6 +825,8 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
     private let searchField = NSSearchField(frame: NSRect(x: 0, y: 0, width: 230, height: 0))
     private weak var progressModeItem: NSToolbarItem?
     private weak var markAllReadItem: NSToolbarItem?
+    private weak var sortItem: NSMenuToolbarItem?
+    private weak var stateFilterItem: NSMenuToolbarItem?
 
     init(owner: WorkspaceViewController) {
         self.owner = owner
@@ -740,6 +856,76 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
         progressModeItem?.image = NSImage(systemSymbolName: progressEnabled ? "text.bubble.fill" : "text.bubble", accessibilityDescription: nil)
 
         markAllReadItem?.isEnabled = owner.hasUnreadIssuesInSelection
+        owner.loadStateFilterOptions()
+        sortItem?.isEnabled = owner.selectionSupportsSort
+        sortItem?.menu = makeSortMenu(current: owner.smartListSort)
+        stateFilterItem?.isEnabled = owner.selectionSupportsSort
+        let filtering = !owner.selectedStates.isEmpty
+        stateFilterItem?.image = NSImage(
+            systemSymbolName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle",
+            accessibilityDescription: "Filter by State"
+        )
+    }
+
+    // Built on demand so the list of States always reflects the loaded issues.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let owner else { return }
+        owner.loadStateFilterOptions()
+        menu.removeAllItems()
+        let selected = owner.selectedStates
+        let options = owner.stateFilterOptions
+        if options.isEmpty {
+            let empty = NSMenuItem(title: "No States", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return
+        }
+        for state in options {
+            let item = NSMenuItem(title: state, action: #selector(stateMenuItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.state = selected.contains(state) ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let clear = NSMenuItem(title: "Show All States", action: #selector(clearStateFilter), keyEquivalent: "")
+        clear.target = self
+        clear.isEnabled = !selected.isEmpty
+        menu.addItem(clear)
+    }
+
+    @objc private func stateMenuItemSelected(_ sender: NSMenuItem) {
+        owner?.toggleStateFilter(sender.title)
+        refresh()
+    }
+
+    @objc private func clearStateFilter() {
+        owner?.clearStateFilter()
+        refresh()
+    }
+
+    private func makeSortMenu(current: IssueSort?) -> NSMenu {
+        let options: [(String, IssueSort?)] = [
+            ("Recently Updated", nil),
+            ("ID (Ascending)", .issueID(descending: false)),
+            ("ID (Descending)", .issueID(descending: true))
+        ]
+        let menu = NSMenu(title: "Sort")
+        for (index, option) in options.enumerated() {
+            let menuItem = NSMenuItem(title: option.0, action: #selector(sortMenuItemSelected(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.tag = index
+            menuItem.state = option.1 == current ? .on : .off
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    @objc private func sortMenuItemSelected(_ sender: NSMenuItem) {
+        switch sender.tag {
+        case 1: owner?.setSmartListSort(.issueID(descending: false))
+        case 2: owner?.setSmartListSort(.issueID(descending: true))
+        default: owner?.setSmartListSort(nil)
+        }
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -749,8 +935,11 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
             ItemID.toggleSidebar,
             ItemID.search,
             ItemID.commandPalette,
+            ItemID.refreshList,
             ItemID.progressMode,
             ItemID.markAllRead,
+            ItemID.sort,
+            ItemID.stateFilter,
             ItemID.newIssue,
             ItemID.toggleInspector
         ]
@@ -763,8 +952,11 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
             ItemID.search,
             .flexibleSpace,
             ItemID.commandPalette,
+            ItemID.refreshList,
             ItemID.progressMode,
             ItemID.markAllRead,
+            ItemID.sort,
+            ItemID.stateFilter,
             ItemID.newIssue,
             ItemID.toggleInspector
         ]
@@ -797,6 +989,13 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
                 symbolName: "command.square",
                 action: #selector(openCommandPalette)
             )
+        case ItemID.refreshList:
+            return makeButtonItem(
+                itemIdentifier: itemIdentifier,
+                label: "Refresh",
+                symbolName: "arrow.clockwise",
+                action: #selector(refreshList)
+            )
         case ItemID.progressMode:
             let item = makeButtonItem(
                 itemIdentifier: itemIdentifier,
@@ -814,6 +1013,28 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
                 action: #selector(markAllRead)
             )
             markAllReadItem = item
+            return item
+        case ItemID.sort:
+            let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Sort"
+            item.paletteLabel = "Sort"
+            item.toolTip = "Sort issues"
+            item.image = NSImage(systemSymbolName: "arrow.up.arrow.down", accessibilityDescription: "Sort")
+            item.showsIndicator = true
+            item.menu = makeSortMenu(current: owner?.smartListSort)
+            sortItem = item
+            return item
+        case ItemID.stateFilter:
+            let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "State"
+            item.paletteLabel = "Filter by State"
+            item.toolTip = "Filter by State"
+            item.image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle", accessibilityDescription: "Filter by State")
+            item.showsIndicator = true
+            let menu = NSMenu(title: "State")
+            menu.delegate = self
+            item.menu = menu
+            stateFilterItem = item
             return item
         case ItemID.newIssue:
             return makeButtonItem(
@@ -862,6 +1083,10 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
         owner?.openCommandPalette()
     }
 
+    @objc private func refreshList() {
+        owner?.refreshCurrentSelection()
+    }
+
     @objc private func toggleProgressMode() {
         owner?.toggleProgressReportingMode()
     }
@@ -884,6 +1109,8 @@ private final class WorkspaceToolbarController: NSObject, NSToolbarDelegate {
 @MainActor
 final class WorkspaceUIState: ObservableObject {
     @Published var searchQuery: String = ""
+    /// Selected State values per sidebar selection id; empty or missing means no filtering.
+    @Published var stateFilters: [String: Set<String>] = [:]
     @Published var isProgressReportingMode: Bool = false
     @Published var showAssigneeColumn: Bool
     #if DEBUG
@@ -988,6 +1215,9 @@ private struct WorkspaceMainPaneRoot: View {
                 todoListManager: container
             )
             .id(todoListID)
+        } else if let projectID = selection.knowledgeBaseProjectID {
+            KnowledgeBaseListView(container: container, appState: appState, projectID: projectID, searchQuery: uiState.searchQuery)
+                .id(projectID)
         } else if uiState.isProgressReportingMode {
             IssueProgressListView(
                 issues: visibleIssues(for: selection),
@@ -1024,6 +1254,9 @@ private struct WorkspaceMainPaneRoot: View {
             },
             onDeleteDraft: { [container] draftID in
                 container.discardDraft(recordID: draftID)
+            },
+            onOpen: { [appState] issue in
+                appState.presentIssueEditor(for: issue)
             }
         )
     }
@@ -1032,7 +1265,8 @@ private struct WorkspaceMainPaneRoot: View {
         WorkspaceIssueListComposer.visibleIssues(
             appState: appState,
             selection: selection,
-            searchQuery: uiState.searchQuery
+            searchQuery: uiState.searchQuery,
+            stateFilter: uiState.stateFilters[selection.id] ?? []
         )
     }
 
@@ -1071,7 +1305,13 @@ private struct WorkspaceInspectorPaneRoot: View {
     @ObservedObject var appState: AppState
 
     var body: some View {
-        content
+        Group {
+            if appState.selectedSidebarItem?.isKnowledgeBase == true {
+                KnowledgeBaseArticleDetailView(appState: appState)
+            } else {
+                content
+            }
+        }
             .inspectorColumnWidth(min: 320, ideal: 400, max: 500)
             .background(.ultraThinMaterial)
     }
@@ -1126,6 +1366,10 @@ private struct WorkspaceOverlayHostView: View {
             .sheet(item: conflictBinding) { conflict in
                 ConflictResolutionDialog(conflict: conflict)
             }
+            .sheet(item: issueEditorBinding) { issue in
+                IssueEditorSheet(issue: issue, appState: appState)
+                    .environmentObject(container)
+            }
             .sheet(item: newIssueDialogItemBinding) { _ in
                 NewIssueDialog(state: newIssueDialogBinding)
             }
@@ -1169,6 +1413,13 @@ private struct WorkspaceOverlayHostView: View {
         Binding(
             get: { appState.activeConflict },
             set: { appState.activeConflict = $0 }
+        )
+    }
+
+    private var issueEditorBinding: Binding<IssueSummary?> {
+        Binding(
+            get: { appState.issueEditorTarget },
+            set: { appState.issueEditorTarget = $0 }
         )
     }
 

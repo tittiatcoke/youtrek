@@ -164,3 +164,27 @@ actor SwitchablePeopleRepository: PeopleRepository {
         try await current.fetchPeople(query: query, projectID: projectID)
     }
 }
+
+actor SwitchableArticleRepository: ArticleRepository {
+    private var current: ArticleRepository
+
+    init(initial: ArticleRepository) {
+        self.current = initial
+    }
+
+    func replace(with repository: ArticleRepository) {
+        current = repository
+    }
+
+    func fetchArticles() async throws -> [KnowledgeBaseArticle] {
+        try await current.fetchArticles()
+    }
+
+    func searchArticleIDs(query: String) async throws -> [String] {
+        try await current.searchArticleIDs(query: query)
+    }
+
+    func fetchArticle(id: String) async throws -> KnowledgeBaseArticle {
+        try await current.fetchArticle(id: id)
+    }
+}

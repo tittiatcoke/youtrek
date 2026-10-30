@@ -23,6 +23,7 @@ struct SidebarItem: Identifiable, Hashable, Sendable {
         case assignedToMe
         case createdByMe
         case todoList
+        case knowledgeBase
         case board
         case savedSearch
         case draft
@@ -38,10 +39,18 @@ struct SidebarItem: Identifiable, Hashable, Sendable {
     var displayTitle: LocalizedStringKey { LocalizedStringKey(title) }
 
     var isInbox: Bool { kind == .inbox }
+    var isSmartList: Bool { kind == .inbox || kind == .assignedToMe || kind == .createdByMe }
     var isBoard: Bool { kind == .board }
     var isSavedSearch: Bool { kind == .savedSearch }
     var isDraft: Bool { kind == .draft }
     var isTodoList: Bool { kind == .todoList }
+    var isKnowledgeBase: Bool { kind == .knowledgeBase }
+    /// Selections that render their own content instead of an issue list.
+    var showsIssueList: Bool { !(isDraft || isTodoList || isKnowledgeBase) }
+    var knowledgeBaseProjectID: String? {
+        guard isKnowledgeBase, id.hasPrefix("kb:") else { return nil }
+        return String(id.dropFirst("kb:".count))
+    }
     var savedQueryID: String? {
         guard isSavedSearch, id.hasPrefix("saved:") else { return nil }
         return String(id.dropFirst("saved:".count))
@@ -127,6 +136,25 @@ extension SidebarItem {
             kind: .todoList,
             title: list.name,
             iconName: "checklist.unchecked",
+            query: IssueQuery(
+                rawQuery: nil,
+                search: "",
+                filters: [],
+                sort: .updated(descending: true),
+                page: page
+            ),
+            board: nil
+        )
+    }
+
+    static func knowledgeBase(project: IssueProject, page: IssueQuery.Page) -> SidebarItem {
+        let short = project.shortName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return SidebarItem(
+            id: "kb:\(project.id)",
+            kind: .knowledgeBase,
+            title: name.isEmpty ? (short.isEmpty ? "Untitled Project" : short) : name,
+            iconName: "books.vertical",
             query: IssueQuery(
                 rawQuery: nil,
                 search: "",

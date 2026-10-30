@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C0DEBA5E0000000000000201 /* KnowledgeBaseArticle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEBA5E0000000000000101 /* KnowledgeBaseArticle.swift */; };
+		C0DEBA5E0000000000000202 /* ArticleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEBA5E0000000000000102 /* ArticleRepository.swift */; };
+		C0DEBA5E0000000000000203 /* YouTrackArticleRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEBA5E0000000000000103 /* YouTrackArticleRepository.swift */; };
+		C0DEBA5E0000000000000204 /* KnowledgeBaseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEBA5E0000000000000104 /* KnowledgeBaseView.swift */; };
 		00FEB9220801E5364D578CD8 /* IssueRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413164C575D17B66BEBD006E /* IssueRepository.swift */; };
 		01D1B7A4C9E54AE0A4D1F001 /* IssueBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11B22C33D44E55F66778899 /* IssueBoard.swift */; };
 		01D1B7A4C9E54AE0A4D1F002 /* IssueBoardLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33B44C55D66E77F8899AABB /* IssueBoardLocalStore.swift */; };
@@ -58,6 +62,7 @@
 		6B9DC658B0707436F4A51EB7 /* Issue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603472AD6E49B166DD1EAE1E /* Issue.swift */; };
 		711FBBDF964284FEE9060EA9 /* IssueFieldRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2DFD58E618AA42ED5A0EBF /* IssueFieldRepository.swift */; };
 		778FF05D4EAC43E62857C01D /* NewIssueToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6FA72E4D9ACF4E1772ABD7F /* NewIssueToolbar.swift */; };
+		5E1D17A0C0DE4B5A9F3C7D22 /* IssueEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1D17A0C0DE4B5A9F3C7D21 /* IssueEditorSheet.swift */; };
 		778FF05D4EAC43E62857C01E /* NewIssueDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6FA72E4D9ACF4E1772ABD80 /* NewIssueDialog.swift */; };
 		7AE22AB917B4430D9243B77F /* TodoChecklistMarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E1E46F7C4BD4B5E8068A8C6 /* TodoChecklistMarkdownRenderer.swift */; };
 		7B01B951558244F8B758DFB5 /* TodoListEditorDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138A65DE64414C11B8195521 /* TodoListEditorDependencies.swift */; };
@@ -132,6 +137,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C0DEBA5E0000000000000101 /* KnowledgeBaseArticle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeBaseArticle.swift; sourceTree = "<group>"; };
+		C0DEBA5E0000000000000102 /* ArticleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleRepository.swift; sourceTree = "<group>"; };
+		C0DEBA5E0000000000000103 /* YouTrackArticleRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTrackArticleRepository.swift; sourceTree = "<group>"; };
+		C0DEBA5E0000000000000104 /* KnowledgeBaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeBaseView.swift; sourceTree = "<group>"; };
 		0320DC32451D113DE40CC6ED /* YouTrekMobileApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YouTrekMobileApp.swift; sourceTree = "<group>"; };
 		03C386EF2EEB26BC00BF8B68 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Sources/YouTrek/Assets.xcassets; sourceTree = "<group>"; };
 		03C386F22F27D9D500BF8B68 /* YouTrek.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = YouTrek.entitlements; sourceTree = "<group>"; };
@@ -222,6 +231,7 @@
 		F1F6D0374F7E4408A078BCF5 /* IssueAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueAttachment.swift; sourceTree = "<group>"; };
 		F6CF48AB03BE902B7518C446 /* YouTrekMobileBootstrap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YouTrekMobileBootstrap.swift; sourceTree = "<group>"; };
 		F6FA72E4D9ACF4E1772ABD7F /* NewIssueToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewIssueToolbar.swift; sourceTree = "<group>"; };
+		5E1D17A0C0DE4B5A9F3C7D21 /* IssueEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueEditorSheet.swift; sourceTree = "<group>"; };
 		F6FA72E4D9ACF4E1772ABD80 /* NewIssueDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewIssueDialog.swift; sourceTree = "<group>"; };
 		FB27A62160674AF58AB8D782 /* TodoIssueIDParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoIssueIDParser.swift; sourceTree = "<group>"; };
 		FD57D8CD24C08703B24D3C86 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
@@ -251,6 +261,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C0DEBA5E0000000000000100 /* KnowledgeBase */ = {
+			isa = PBXGroup;
+			children = (
+				C0DEBA5E0000000000000104 /* KnowledgeBaseView.swift */,
+			);
+			path = KnowledgeBase;
+			sourceTree = "<group>";
+		};
 		2477BA839EEA2330B12D4BC6 /* App */ = {
 			isa = PBXGroup;
 			children = (
@@ -354,6 +372,7 @@
 		6DF3A370813AC3E82C4226B5 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				C0DEBA5E0000000000000103 /* YouTrackArticleRepository.swift */,
 				F1BD79F1B118CDA555E3FDC0 /* YouTrackAPIClient.swift */,
 				4AB6E61C64224428A2A41938 /* YouTrackIssueRepository.swift */,
 				17406340445C66429F51F7FD /* YouTrackProjectRepository.swift */,
@@ -381,6 +400,7 @@
 				AEE1832E3065BE4BE02CC565 /* IssueList */,
 				B6A7C8D9E0F1122334455667 /* IssueBoard */,
 				A1B2C3D4E5F60718293A4B70 /* Todo */,
+				C0DEBA5E0000000000000100 /* KnowledgeBase */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -388,6 +408,7 @@
 		78D300D18D4011F501E7E46E /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				C0DEBA5E0000000000000101 /* KnowledgeBaseArticle.swift */,
 				603472AD6E49B166DD1EAE1E /* Issue.swift */,
 				837E26CF86C45D20765721F4 /* IssueProject.swift */,
 				DE9F4461DE8B8BB59A4A40DC /* IssueField.swift */,
@@ -484,6 +505,7 @@
 		BA383389B3C4422CDD556790 /* Repositories */ = {
 			isa = PBXGroup;
 			children = (
+				C0DEBA5E0000000000000102 /* ArticleRepository.swift */,
 				6A2BB972C688C970A43F8706 /* AuthRepository.swift */,
 				413164C575D17B66BEBD006E /* IssueRepository.swift */,
 				22474C986C8B156AE420F86D /* ProjectRepository.swift */,
@@ -548,6 +570,7 @@
 				F0D1C2B3A4E5968778695A4C /* UserAvatarView.swift */,
 				F6FA72E4D9ACF4E1772ABD7F /* NewIssueToolbar.swift */,
 				F6FA72E4D9ACF4E1772ABD80 /* NewIssueDialog.swift */,
+				5E1D17A0C0DE4B5A9F3C7D21 /* IssueEditorSheet.swift */,
 				0BF8D7F6E11A42FDA2178071 /* CommandPaletteDialog.swift */,
 				C0FFEE1234567890ABCDEF01 /* IssueBadgeViews.swift */,
 				E827C5F39D5E4DFEA06C2463 /* MarkdownTextView.swift */,
@@ -805,6 +828,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0DEBA5E0000000000000201 /* KnowledgeBaseArticle.swift in Sources */,
+				C0DEBA5E0000000000000202 /* ArticleRepository.swift in Sources */,
+				C0DEBA5E0000000000000203 /* YouTrackArticleRepository.swift in Sources */,
+				C0DEBA5E0000000000000204 /* KnowledgeBaseView.swift in Sources */,
 				E9C4B2243C4A344ED73BAE55 /* AppAuthRepository.swift in Sources */,
 				2C7F193FF8B70AEE455E2DA1 /* AppContainer.swift in Sources */,
 				B1F0E1B28F16D4C39B3F8A01 /* AppConfigurationStore.swift in Sources */,
@@ -844,6 +871,7 @@
 				F0D1C2B3A4E5968778695A4B /* UserAvatarView.swift in Sources */,
 				778FF05D4EAC43E62857C01D /* NewIssueToolbar.swift in Sources */,
 				778FF05D4EAC43E62857C01E /* NewIssueDialog.swift in Sources */,
+				5E1D17A0C0DE4B5A9F3C7D22 /* IssueEditorSheet.swift in Sources */,
 				6154B2B141184ED2B93861A6 /* CommandPaletteDialog.swift in Sources */,
 				C0FFEE1234567890ABCDEF02 /* IssueBadgeViews.swift in Sources */,
 				B6F7001D7CF24BDB9EF0D0A7 /* MarkdownTextView.swift in Sources */,
@@ -982,7 +1010,7 @@
 				CODE_SIGN_ENTITLEMENTS = YouTrek.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 49PJNAT2WC;
+				DEVELOPMENT_TEAM = ULR4C88643;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
@@ -1177,7 +1205,7 @@
 				CODE_SIGN_ENTITLEMENTS = YouTrek.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 49PJNAT2WC;
+				DEVELOPMENT_TEAM = ULR4C88643;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
