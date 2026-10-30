@@ -18,6 +18,7 @@ struct IssueListView: NSViewRepresentable {
     let isIssueUnread: (IssueSummary) -> Bool
     let onIssuesRendered: ((Int) -> Void)?
     let onDeleteDraft: ((UUID) -> Void)?
+    var onOpen: ((IssueSummary) -> Void)? = nil
 
     private static let loadingIndicatorDelayNanoseconds: UInt64 = 250_000_000
 
@@ -126,6 +127,8 @@ struct IssueListView: NSViewRepresentable {
             tableView.delegate = self
             tableView.dataSource = self
             tableView.menu = contextMenu
+            tableView.target = self
+            tableView.action = #selector(rowClicked(_:))
             tableView.headerView = nil
             tableView.cornerView = nil
             tableView.allowsMultipleSelection = true
@@ -138,6 +141,18 @@ struct IssueListView: NSViewRepresentable {
             tableView.rowHeight = 40
             contextMenu.delegate = self
             rebuildColumns(on: tableView)
+        }
+
+        // Fires for mouse clicks only (not keyboard navigation), so arrow keys keep
+        // moving the selection without opening the editor.
+        @objc private func rowClicked(_ sender: NSTableView) {
+            let flags = NSEvent.modifierFlags.intersection([.command, .shift, .control, .option])
+            guard flags.isEmpty else { return }
+            let row = sender.clickedRow
+            guard row >= 0, row < parent.issues.count else { return }
+            let issue = parent.issues[row]
+            guard !issue.isDraft else { return }
+            parent.onOpen?(issue)
         }
 
         private func syncSelectionState() {

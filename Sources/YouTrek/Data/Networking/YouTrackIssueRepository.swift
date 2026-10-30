@@ -587,6 +587,8 @@ private extension YouTrackIssueRepository {
                     parts.append("sort by: updated \(descending ? "desc" : "asc")")
                 case .priority(let descending):
                     parts.append("sort by: priority \(descending ? "desc" : "asc")")
+                case .issueID(let descending):
+                    parts.append("sort by: {issue id} \(descending ? "desc" : "asc")")
                 }
             }
             return parts.joined(separator: " ")
@@ -610,6 +612,8 @@ private extension YouTrackIssueRepository {
                 parts.append("sort by: updated \(descending ? "desc" : "asc")")
             case .priority(let descending):
                 parts.append("sort by: priority \(descending ? "desc" : "asc")")
+            case .issueID(let descending):
+                parts.append("sort by: {issue id} \(descending ? "desc" : "asc")")
             }
         }
 

@@ -11,6 +11,8 @@ struct IssueBoardView: View {
     let showDiagnostics: Bool
     let diagnosticEvents: [BoardDataSourceEvent]
     let onSelectSprint: (BoardSprintFilter) -> Void
+    var onOpen: (IssueSummary) -> Void = { _ in }
+    var onMove: (IssueSummary, [String], String?) -> Void = { _, _, _ in }
 
     @State private var collapsedGroups: Set<String> = []
     @State private var showsLoadingView = false
@@ -102,7 +104,13 @@ struct IssueBoardView: View {
                             issuesByColumn: layout.cells[group.id] ?? [:],
                             columnWidth: columnWidth,
                             spacing: columnSpacing,
-                            onSelect: { selection = $0 }
+                            onSelect: {
+                                selection = $0
+                                onOpen($0)
+                            },
+                            onDropIssue: { issueID, columnID in
+                                handleDrop(issueID: issueID, columnID: columnID)
+                            }
                         )
                     } label: {
                         IssueBoardGroupHeader(group: group)
@@ -115,6 +123,26 @@ struct IssueBoardView: View {
             .padding(.bottom, 16)
         }
         .scrollIndicators(.visible)
+    }
+
+    private func handleDrop(issueID: String, columnID: String) {
+        guard let issue = issues.first(where: { $0.id.uuidString == issueID }) else { return }
+        let matching = makeColumnMatching()
+        guard let matcher = matching.matchers.first(where: { $0.id == columnID }) else { return }
+        let values: [String]
+        switch matcher.rule {
+        case .fieldValues(let names):
+            // Prefer the column title when it is one of the values, otherwise any value.
+            let title = matcher.title.lowercased()
+            values = names.contains(title) ? [title] : Array(names)
+            let current = Set(issue.fieldValues(named: matching.fieldName ?? "state").map { $0.lowercased() })
+                .union(matching.useStatusFallback ? [issue.status.displayName.lowercased()] : [])
+            if !current.isDisjoint(with: names) { return }
+        case .status(let status):
+            if issue.status == status { return }
+            values = [status.displayName, status.rawValue]
+        }
+        onMove(issue, values, board.columnFieldName)
     }
 
     private func boardContentWidth(layout: BoardLayout) -> CGFloat {
@@ -755,6 +783,7 @@ private struct IssueBoardLane: View {
     let columnWidth: CGFloat
     let spacing: CGFloat
     let onSelect: (IssueSummary) -> Void
+    let onDropIssue: (String, String) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: spacing) {
@@ -762,7 +791,8 @@ private struct IssueBoardLane: View {
                 IssueBoardColumnView(
                     issues: issuesByColumn[column.id] ?? [],
                     columnWidth: columnWidth,
-                    onSelect: onSelect
+                    onSelect: onSelect,
+                    onDrop: { onDropIssue($0, column.id) }
                 )
                 .frame(width: columnWidth, alignment: .top)
             }
@@ -775,6 +805,8 @@ private struct IssueBoardColumnView: View {
     let issues: [IssueSummary]
     let columnWidth: CGFloat
     let onSelect: (IssueSummary) -> Void
+    let onDrop: (String) -> Void
+    @State private var isDropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -783,6 +815,7 @@ private struct IssueBoardColumnView: View {
                     .onTapGesture {
                         onSelect(issue)
                     }
+                    .draggable(issue.id.uuidString)
             }
             Button {
                 // Placeholder for "add card"
@@ -795,8 +828,13 @@ private struct IssueBoardColumnView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(.quaternary.opacity(0.3))
+        .background(.quaternary.opacity(isDropTargeted ? 0.7 : 0.3))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .dropDestination(for: String.self) { items, _ in
+            guard let id = items.first else { return false }
+            onDrop(id)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
     }
 }
 

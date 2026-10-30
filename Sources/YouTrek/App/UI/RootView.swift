@@ -1293,6 +1293,12 @@ struct BoardContentView: View {
                 Task {
                     await container.updateSprintFilter(filter, for: board)
                 }
+            },
+            onOpen: { appState.presentIssueEditor(for: $0) },
+            onMove: { issue, values, fieldName in
+                Task {
+                    await container.moveIssue(issue, toColumnValues: values, columnFieldName: fieldName)
+                }
             }
         )
     }

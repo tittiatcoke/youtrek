@@ -18,7 +18,7 @@ enum MarkdownDisplayTextRenderer {
 
         func flushMarkdown() {
             guard !markdownLines.isEmpty else { return }
-            segments.append(.markdown(markdownLines.joined(separator: "\n")))
+            segments.append(contentsOf: splitTables(from: markdownLines))
             markdownLines.removeAll(keepingCapacity: true)
         }
 
@@ -127,6 +127,83 @@ enum MarkdownDisplayTextRenderer {
         return linePreservingAttributedMarkdown(for: prepared) ?? attributed
     }
 
+    /// Splits markdown lines into plain markdown runs and GFM tables (header row, `|---|` separator, body rows).
+    static func splitTables(from lines: [String]) -> [MarkdownSegment] {
+        var segments: [MarkdownSegment] = []
+        var pending: [String] = []
+        var index = 0
+
+        func flushPending() {
+            guard !pending.isEmpty else { return }
+            segments.append(.markdown(pending.joined(separator: "\n")))
+            pending.removeAll(keepingCapacity: true)
+        }
+
+        while index < lines.count {
+            if index + 1 < lines.count,
+               let header = tableCells(in: lines[index]),
+               let alignments = tableAlignments(in: lines[index + 1]),
+               alignments.count == header.count {
+                flushPending()
+                var rows: [[String]] = []
+                index += 2
+                while index < lines.count, let cells = tableCells(in: lines[index]) {
+                    var row = Array(cells.prefix(header.count))
+                    while row.count < header.count { row.append("") }
+                    rows.append(row)
+                    index += 1
+                }
+                segments.append(.table(MarkdownTable(header: header, alignments: alignments, rows: rows)))
+            } else {
+                pending.append(lines[index])
+                index += 1
+            }
+        }
+        flushPending()
+        return segments
+    }
+
+    private static func tableCells(in line: String) -> [String]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") else { return nil }
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for character in trimmed {
+            if escaped {
+                current.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        cells.append(current)
+        if trimmed.hasPrefix("|") { cells.removeFirst() }
+        if trimmed.hasSuffix("|") && !cells.isEmpty { cells.removeLast() }
+        guard !cells.isEmpty else { return nil }
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private static func tableAlignments(in line: String) -> [MarkdownTable.Alignment]? {
+        guard let cells = tableCells(in: line) else { return nil }
+        var alignments: [MarkdownTable.Alignment] = []
+        for cell in cells {
+            let core = cell.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            guard !core.isEmpty, core.allSatisfy({ $0 == "-" }) else { return nil }
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): alignments.append(.center)
+            case (false, true): alignments.append(.trailing)
+            default: alignments.append(.leading)
+            }
+        }
+        return alignments
+    }
+
     static func normalizeLineEndings(in text: String) -> String {
         text
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -225,6 +302,8 @@ struct MarkdownTextView: View {
                         }
                     case .codeBlock(let code, let language):
                         MarkdownCodeBlockView(code: code, language: language, font: codeFont)
+                    case .table(let table):
+                        MarkdownTableView(table: table, font: font)
                     }
                 }
             }
@@ -717,6 +796,83 @@ private enum MarkdownRemoteImageLoadState {
 enum MarkdownSegment: Equatable {
     case markdown(String)
     case codeBlock(String, language: String?)
+    case table(MarkdownTable)
+}
+
+struct MarkdownTable: Equatable {
+    enum Alignment: Equatable { case leading, center, trailing }
+
+    let header: [String]
+    let alignments: [Alignment]
+    let rows: [[String]]
+}
+
+private struct MarkdownTableView: View {
+    let table: MarkdownTable
+    let font: Font
+
+    private static let columnMinWidth: CGFloat = 60
+    private static let columnMaxWidth: CGFloat = 280
+    private static let approxCharacterWidth: CGFloat = 7
+
+    /// Fixed per-column widths so wrapped cell text is measured at its real width;
+    /// without them a row is sized for the unwrapped text and wrapped lines overlap.
+    private var columnWidths: [CGFloat] {
+        table.header.indices.map { column in
+            let longest = ([table.header[column]] + table.rows.map { $0[column] })
+                .map { $0.count }
+                .max() ?? 0
+            let estimated = CGFloat(longest) * Self.approxCharacterWidth + 16
+            return min(max(estimated, Self.columnMinWidth), Self.columnMaxWidth)
+        }
+    }
+
+    var body: some View {
+        let widths = columnWidths
+        ScrollView(.horizontal, showsIndicators: true) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(table.header.indices, id: \.self) { column in
+                        cell(table.header[column], column: column, width: widths[column], isHeader: true)
+                    }
+                }
+                .background(.quaternary.opacity(0.5))
+                ForEach(table.rows.indices, id: \.self) { row in
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    GridRow {
+                        ForEach(table.rows[row].indices, id: \.self) { column in
+                            cell(table.rows[row][column], column: column, width: widths[column], isHeader: false)
+                        }
+                    }
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(.quaternary)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+    }
+
+    private func cell(_ source: String, column: Int, width: CGFloat, isHeader: Bool) -> some View {
+        let alignment = table.alignments[column]
+        return Text(Self.inline(source))
+            .font(isHeader ? font.weight(.semibold) : font)
+            .multilineTextAlignment(alignment == .trailing ? .trailing : (alignment == .center ? .center : .leading))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(width: width, alignment: alignment == .trailing ? .trailing : (alignment == .center ? .center : .leading))
+    }
+
+    private static func inline(_ source: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+    }
 }
 
 private struct MarkdownCodeBlockView: View {
