@@ -1,12 +1,11 @@
 # YouTrek
 
-YouTrek is a native YouTrack client for macOS, with an experimental mobile target and a built-in command line interface. The app focuses on fast issue triage, offline-friendly caches, board/saved-search navigation, issue editing, attachments, comments, and local todo lists.
+YouTrek is a native YouTrack client for macOS with a built-in command line interface. The app focuses on fast issue triage, offline-friendly caches, board/saved-search navigation, issue editing, attachments, comments, and local todo lists.
 
 ## What Is In This Repository
 
 - `YouTrek.xcodeproj` is the primary project file. It is checked in and should be kept up to date when source files are added.
 - `Sources/YouTrek` contains the macOS app, shared domain/data layers, sync, persistence, networking, auth, support services, and CLI entrypoint.
-- `Sources/YouTrekMobile` contains the mobile app target.
 - `Tests/YouTrekTests` contains unit tests for the shared app logic.
 - `docs/` contains deeper notes for architecture, YouTrack API usage, database shape, CLI behavior, and AI-related ideas.
 - `landing/` contains the static marketing page assets.
@@ -42,7 +41,6 @@ To build without launching:
 xcodebuild -scheme YouTrek -configuration Debug -destination 'platform=macOS' build
 ```
 
-The repository also includes a `YouTrekMobile` scheme for the mobile target.
 
 ## CLI
 
@@ -83,10 +81,6 @@ Sources/YouTrek/
   Domain/           models, repositories, view models
   Infra/            logging, telemetry, app container, keychain/config support
   Assets.xcassets/  macOS assets
-
-Sources/YouTrekMobile/
-  App/              mobile app bootstrap and root view
-  Assets.xcassets/  mobile assets
 
 Tests/YouTrekTests/
   shared logic tests

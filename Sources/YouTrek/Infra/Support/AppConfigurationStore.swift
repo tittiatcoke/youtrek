@@ -89,10 +89,16 @@ struct AppConfigurationStore: @unchecked Sendable {
         let start = ProcessInfo.processInfo.systemUptime
         let accessGroup = sharedAccessGroup()
         logStartupTiming("defaultKeychain resolved access group for \(service)", start: start)
+        #if LOCAL_BUILD
+        // Ad-hoc local builds have no keychain access groups or iCloud Keychain sync.
+        let synchronizable = false
+        #else
+        let synchronizable = true
+        #endif
         return KeychainStorage(
             service: service,
             accessGroup: accessGroup,
-            synchronizable: true,
+            synchronizable: synchronizable,
             prefersDataProtectionKeychain: prefersDataProtectionKeychain
         )
     }

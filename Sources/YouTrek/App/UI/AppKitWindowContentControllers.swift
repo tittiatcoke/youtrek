@@ -284,6 +284,8 @@ final class WorkspaceViewController: NSViewController {
 
     private var toolbarController: WorkspaceToolbarController?
     private var autoRefreshTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
+    private var lastAutoRefreshAt = Date.distantPast
     private var cancellables: Set<AnyCancellable> = []
     private var previousSidebarSelection: SidebarItem?
     private let uiState: WorkspaceUIState
@@ -715,10 +717,12 @@ final class WorkspaceViewController: NSViewController {
     fileprivate func refreshCurrentSelection() {
         guard let selection = appState.selectedSidebarItem, !selection.isDraft else { return }
         Task { [container] in
-            if selection.isBoard {
+            if selection.isKnowledgeBase {
+                await container.refreshKnowledgeBase()
+            } else if selection.isBoard {
                 await container.refreshBoardIssues(for: selection)
             } else {
-                await container.loadIssues(for: selection)
+                await container.loadIssues(for: selection, force: true)
             }
         }
     }
@@ -727,11 +731,32 @@ final class WorkspaceViewController: NSViewController {
         autoRefreshTimer?.invalidate()
         autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, NSApp.isActive, self.view.window?.isKeyWindow == true,
-                      !self.appState.isLoadingIssues else { return }
-                self.refreshCurrentSelection()
+                self?.autoRefreshIfNeeded()
             }
         }
+        autoRefreshTimer?.tolerance = 5
+        if activationObserver == nil {
+            // The timer is skipped while the app is in the background, so catch up on return.
+            activationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if Date().timeIntervalSince(self.lastAutoRefreshAt) > 10 {
+                        self.autoRefreshIfNeeded()
+                    }
+                }
+            }
+        }
+    }
+
+    private func autoRefreshIfNeeded() {
+        guard NSApp.isActive, self.view.window?.isVisible == true else { return }
+        guard appState.selectedSidebarItem?.isKnowledgeBase == true || !appState.isLoadingIssues else { return }
+        lastAutoRefreshAt = Date()
+        refreshCurrentSelection()
     }
 
     fileprivate func markAllIssuesSeen() {

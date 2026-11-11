@@ -553,7 +553,7 @@ final class AppContainer: ObservableObject {
         Task { await loadIssues(for: selection) }
     }
 
-    func loadIssues(for selection: SidebarItem) async {
+    func loadIssues(for selection: SidebarItem, force: Bool = false) async {
         guard selection.showsIssueList else { return }
         let selectionChanged = lastLoadedIssueSelection?.id != selection.id
         if selectionChanged {
@@ -601,7 +601,7 @@ final class AppContainer: ObservableObject {
             recordDataEvent("Issue query: \(queryLabel).")
         }
         lastLoadedIssueSelection = selection
-        if !selectionChanged, query == lastLoadedIssueQuery {
+        if !force, !selectionChanged, query == lastLoadedIssueQuery {
             recordDataEvent("Load issues skipped (same query).")
             return
         }
@@ -3932,3 +3932,4 @@ actor TodoListMarkdownStore {
         return normalized.isEmpty ? "png" : normalized
     }
 }
+

@@ -78,10 +78,17 @@ struct KnowledgeBaseArticleDetailView: View {
     @State private var isLoading = false
     @State private var loadError: String?
 
+    /// Reloads when the selection changes or the periodic refresh sees the article was edited.
+    private var reloadKey: String {
+        let id = appState.selectedArticleID ?? ""
+        let updated = container.knowledgeBaseArticle(id: id)?.updatedAt?.timeIntervalSince1970 ?? 0
+        return "\(id)|\(updated)"
+    }
+
     var body: some View {
         content
             .frame(minWidth: 280, idealWidth: 400, maxWidth: .infinity, minHeight: 200, idealHeight: 700, maxHeight: .infinity)
-            .task(id: appState.selectedArticleID) { await load() }
+            .task(id: reloadKey) { await load() }
             .environment(\.openURL, OpenURLAction { url in
                 // Links to other articles stay in the app; everything else opens in the browser.
                 guard let article = container.knowledgeBaseArticle(for: url) else { return .systemAction }
